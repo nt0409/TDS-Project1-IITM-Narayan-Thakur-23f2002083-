@@ -27,9 +27,13 @@ This project is a Promptfoo-powered evaluation system for a Virtual Teaching Ass
   "question": "What is the deadline for the TDS Week 5 quiz?",
   "image": "images/project-tds-virtual-ta-q1.webp"
 }
-Author
-Narayan Thakur
-Student at IIT Madras
-BSc in Data Science and Applications
-Student ID: 23f2002083
-GitHub: nt0409
+```
+
+---
+
+## 👨‍💻 Author
+
+**Narayan Thakur**  
+BSc in Data Science and Applications, IIT Madras  
+Student ID: `23f2002083`  
+GitHub: [nt0409](https://github.com/nt0409)
