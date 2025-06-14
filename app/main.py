@@ -10,12 +10,12 @@ import os
 import json
 import time
 
-# Load environment variables (Render supports this via its dashboard)
+# Load environment variables
 load_dotenv()
 
 app = FastAPI()
 
-# Enable CORS for any frontend that might access the API
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,41 +24,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Proxy setup
+# Configuration
 PROXY_URL = "https://aiproxy.sanand.workers.dev/openai/"
 PROXY_TOKEN = os.getenv("AIPROXY_TOKEN")
 if not PROXY_TOKEN:
     raise EnvironmentError("Missing AIPROXY_TOKEN")
 
-# Pydantic model
+# Data model
 class UserQuery(BaseModel):
     question: str
     image: Optional[str] = None
 
 # File paths
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")  # Flattened for Render
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 POSTS_JSON = os.path.join(DATA_DIR, "DiscourseData.json")
 INDEX_FILE = os.path.join(DATA_DIR, "post_index.pkl")
 EMBED_FILE = os.path.join(DATA_DIR, "post_embeddings.pkl")
 
-# Load metadata
+# Metadata loader
 def load_post_snippets(limit=30):
+    if not os.path.exists(POSTS_JSON):
+        print(f"Warning: {POSTS_JSON} missing.")
+        return []
     try:
         with open(POSTS_JSON, "r", encoding="utf-8") as f:
             posts = json.load(f)
         return [{"url": p["url"], "text": p["text"][:500]} for p in posts[:limit]]
     except Exception as e:
-        print(f"Error loading {POSTS_JSON}: {e}")
+        print(f"Error loading JSON: {e}")
         return []
 
-# Load or create metadata
+# Load or create index
 if os.path.exists(INDEX_FILE):
     try:
         with open(INDEX_FILE, "rb") as f:
-            metadata = pickle.load(f)["metadata"]
+            metadata = pickle.load(f)["metadata"][:30]
     except Exception as e:
         print("Index error:", e)
         metadata = load_post_snippets()
@@ -67,7 +70,7 @@ else:
     with open(INDEX_FILE, "wb") as f:
         pickle.dump({"metadata": metadata}, f)
 
-# Get embeddings
+# Embedding generator
 def fetch_embeddings(texts: List[str], batch=5, retry=3) -> List[List[float]]:
     vectors = []
     for i in range(0, len(texts), batch):
@@ -84,16 +87,17 @@ def fetch_embeddings(texts: List[str], batch=5, retry=3) -> List[List[float]]:
                     timeout=10
                 )
                 res.raise_for_status()
-                vectors += [d["embedding"] for d in res.json()["data"]]
+                batch_vecs = [item["embedding"] for item in res.json()["data"]]
+                vectors.extend(batch_vecs)
                 break
-            except Exception as e:
-                print(f"Embedding error on batch {i//batch+1}, try {attempt+1}: {e}")
+            except Exception as err:
+                print(f"Embedding error (batch {i//batch + 1}, try {attempt + 1}): {err}")
                 if attempt == retry - 1:
-                    vectors += [[0] * 1536 for _ in chunk]
+                    vectors.extend([[0] * 1536 for _ in chunk])
                 time.sleep(2 ** attempt)
     return vectors
 
-# Load or generate post embeddings
+# Load embeddings
 if os.path.exists(EMBED_FILE):
     try:
         with open(EMBED_FILE, "rb") as f:
@@ -108,7 +112,7 @@ else:
 if not post_embeddings:
     post_embeddings = fetch_embeddings([p["text"] for p in metadata])
 
-# Chat completion
+# Completion call
 def generate_response(question: str, context: str, image: Optional[str] = None) -> str:
     try:
         messages = [
@@ -116,19 +120,14 @@ def generate_response(question: str, context: str, image: Optional[str] = None) 
                 "role": "system",
                 "content": (
                     "You are a helpful AI teaching assistant for a university-level data science course. "
-                    "Respond to students with clear, fact-based answers using the context provided."
+                    "Respond to students with brief, fact-based answers drawn from the course context."
                 )
             },
-            {
-                "role": "user",
-                "content": f"Student asked: {question}\nRelevant context:\n{context}"
-            }
+            {"role": "user", "content": f"Student asked: {question}\nRelevant context:\n{context}"}
         ]
         if image:
-            messages.append({
-                "role": "user",
-                "content": f"Also consider this image (base64 or URL): {image}"
-            })
+            messages.append({"role": "user", "content": f"Please also consider the attached image: {image}"})
+        
         res = requests.post(
             f"{PROXY_URL}v1/chat/completions",
             headers={
@@ -142,46 +141,57 @@ def generate_response(question: str, context: str, image: Optional[str] = None) 
         return res.json().get("choices", [{}])[0].get("message", {}).get("content", "No response.")
     except Exception as err:
         print("Chat completion error:", err)
-        return "I'm unable to answer right now. Please refer to your course material."
+        return "I'm unable to answer right now. Please check the resources linked."
 
-# Main API
+# Main API endpoint
 @app.api_route("/api/", methods=["POST", "OPTIONS"])
 async def handle_query(request: Request):
     if request.method == "OPTIONS":
-        return {}
-
+        return {}  # Preflight CORS
+    
     try:
-        data = await request.json()
-        user_input = UserQuery(**data)
+        raw = await request.body()
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            user_input = UserQuery(**payload)
+        except json.JSONDecodeError:
+            user_input = UserQuery(**await request.json())
+        
         question = user_input.question
         image = user_input.image
+        
+        query_vec = fetch_embeddings([question])[0]
+        if not query_vec or all(val == 0 for val in query_vec):
+            raise ValueError("Invalid embedding generated")
 
-        query_vector = fetch_embeddings([question])[0]
-        if not query_vector or all(x == 0 for x in query_vector):
-            raise ValueError("Invalid embedding generated.")
-
-        # Cosine similarity
+        # Compute cosine similarity
         sims = [
-            np.dot(query_vector, emb) / (np.linalg.norm(query_vector) * np.linalg.norm(emb))
+            np.dot(query_vec, emb) / (np.linalg.norm(query_vec) * np.linalg.norm(emb))
             if np.linalg.norm(emb) > 0 else 0
             for emb in post_embeddings
         ]
-        top_indices = np.argsort(sims)[-5:][::-1]
+        top_matches = np.argsort(sims)[-5:][::-1]
 
         context = ""
-        links = []
-        for idx in top_indices:
-            if sims[idx] > 0.1:
-                snippet = metadata[idx]
-                short_text = snippet["text"].split(".")[0]
-                if len(short_text) > 100:
-                    short_text = short_text[:97] + "..."
-                context += f"- {snippet['text'][:500]}\n"
-                links.append({"url": snippet["url"], "text": short_text})
+        references = []
+        for idx in top_matches:
+            if sims[idx] > 0.1 and idx < len(metadata):
+                post = metadata[idx]
+                preview = post["text"].split(".")[0]
+                if len(preview) > 100:
+                    preview = preview[:97] + "..."
+                references.append({"url": post["url"], "text": preview})
+                context += f"- {post['text'][:500]}\n"
 
         response = generate_response(question, context, image)
-        return {"answer": response, "links": links}
-
+        return {"answer": response, "links": references}
+    
     except Exception as err:
         raise HTTPException(status_code=500, detail=f"Internal Error: {str(err)}")
 
+# Run locally
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000)
