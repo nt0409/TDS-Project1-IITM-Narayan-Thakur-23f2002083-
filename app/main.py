@@ -1,20 +1,21 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import List, Optional
+from dotenv import load_dotenv
 import requests
 import numpy as np
 import pickle
 import os
 import json
-from typing import List
 import time
-from dotenv import load_dotenv
 
+# Load environment variables (Render supports this via its dashboard)
 load_dotenv()
 
 app = FastAPI()
 
-# CORS configuration
+# Enable CORS for any frontend that might access the API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,222 +24,164 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# AIPROXY configuration
-AIPROXY_URL = "https://aiproxy.sanand.workers.dev/openai/"
-AIPROXY_TOKEN = os.getenv("AIPROXY_TOKEN")
-print("DEBUG AIPROXY_TOKEN:", AIPROXY_TOKEN)
-if not AIPROXY_TOKEN:
-    raise ValueError("AIPROXY_TOKEN environment variable not set")
+# Proxy setup
+PROXY_URL = "https://aiproxy.sanand.workers.dev/openai/"
+PROXY_TOKEN = os.getenv("AIPROXY_TOKEN")
+if not PROXY_TOKEN:
+    raise EnvironmentError("Missing AIPROXY_TOKEN")
 
-class Query(BaseModel):
+# Pydantic model
+class UserQuery(BaseModel):
     question: str
-    image: str | None = None
+    image: Optional[str] = None
 
-# Paths
-script_dir = os.path.dirname(os.path.abspath(__file__))
-data_dir = os.path.join(script_dir, "..", "data")
-os.makedirs(data_dir, exist_ok=True)
-index_path = os.path.join(data_dir, "post_index_combined.pkl")
+# File paths
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")  # Flattened for Render
+os.makedirs(DATA_DIR, exist_ok=True)
 
-# Load combined metadata
-def load_combined_metadata():
-    combined = []
+POSTS_JSON = os.path.join(DATA_DIR, "DiscourseData.json")
+INDEX_FILE = os.path.join(DATA_DIR, "post_index.pkl")
+EMBED_FILE = os.path.join(DATA_DIR, "post_embeddings.pkl")
 
-    discourse_path = os.path.join(data_dir, "discourse_posts.json")
-    if os.path.exists(discourse_path):
-        with open(discourse_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    p = json.loads(line)
-                    combined.append({
-                        "url": p.get("url", ""),
-                        "text": p.get("content", "")[:500]
-                    })
-                except json.JSONDecodeError:
-                    continue
-    else:
-        print("Discourse data not found!")
-
-    course_path = os.path.join(data_dir, "course_content.json")
-    if os.path.exists(course_path):
-        with open(course_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    p = json.loads(line)
-                    combined.append({
-                        "url": p.get("url", ""),
-                        "text": p.get("content", "")[:500]
-                    })
-                except json.JSONDecodeError:
-                    continue
-    else:
-        print("Course content data not found!")
-
-    return combined[:100]
-
-# Load or regenerate metadata index
-if os.path.exists(index_path):
+# Load metadata
+def load_post_snippets(limit=30):
     try:
-        with open(index_path, "rb") as f:
-            index_data = pickle.load(f)
-        metadata = index_data["metadata"]
+        with open(POSTS_JSON, "r", encoding="utf-8") as f:
+            posts = json.load(f)
+        return [{"url": p["url"], "text": p["text"][:500]} for p in posts[:limit]]
     except Exception as e:
-        print(f"Error loading index: {e}")
-        metadata = load_combined_metadata()
+        print(f"Error loading {POSTS_JSON}: {e}")
+        return []
+
+# Load or create metadata
+if os.path.exists(INDEX_FILE):
+    try:
+        with open(INDEX_FILE, "rb") as f:
+            metadata = pickle.load(f)["metadata"]
+    except Exception as e:
+        print("Index error:", e)
+        metadata = load_post_snippets()
 else:
-    print("Generating new metadata...")
-    metadata = load_combined_metadata()
-    try:
-        with open(index_path, "wb") as f:
-            pickle.dump({"metadata": metadata}, f)
-        print("Metadata saved.")
-    except Exception as e:
-        print(f"Error saving metadata: {e}")
+    metadata = load_post_snippets()
+    with open(INDEX_FILE, "wb") as f:
+        pickle.dump({"metadata": metadata}, f)
 
 # Get embeddings
-def get_embeddings(texts: List[str], batch_size: int = 5, retries: int = 3) -> List[List[float]]:
-    embeddings = []
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i:i + batch_size]
-        for attempt in range(retries):
+def fetch_embeddings(texts: List[str], batch=5, retry=3) -> List[List[float]]:
+    vectors = []
+    for i in range(0, len(texts), batch):
+        chunk = texts[i:i + batch]
+        for attempt in range(retry):
             try:
-                response = requests.post(
-                    f"{AIPROXY_URL}v1/embeddings",
+                res = requests.post(
+                    f"{PROXY_URL}v1/embeddings",
                     headers={
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {AIPROXY_TOKEN}"
+                        "Authorization": f"Bearer {PROXY_TOKEN}",
+                        "Content-Type": "application/json"
                     },
-                    json={
-                        "model": "text-embedding-3-small",
-                        "input": batch
-                    },
+                    json={"model": "text-embedding-3-small", "input": chunk},
                     timeout=10
                 )
-                response.raise_for_status()
-                batch_embeddings = [item["embedding"] for item in response.json()["data"]]
-                embeddings.extend(batch_embeddings)
+                res.raise_for_status()
+                vectors += [d["embedding"] for d in res.json()["data"]]
                 break
             except Exception as e:
-                print(f"Embedding error batch {i//batch_size + 1}, attempt {attempt + 1}: {e}")
-                if attempt == retries - 1:
-                    embeddings.extend([[0] * 1536 for _ in batch])
+                print(f"Embedding error on batch {i//batch+1}, try {attempt+1}: {e}")
+                if attempt == retry - 1:
+                    vectors += [[0] * 1536 for _ in chunk]
                 time.sleep(2 ** attempt)
-    return embeddings
+    return vectors
 
-# Chat Completion with prompts
-def get_chat_completion(question: str, context: str, image: str | None = None) -> str:
+# Load or generate post embeddings
+if os.path.exists(EMBED_FILE):
+    try:
+        with open(EMBED_FILE, "rb") as f:
+            post_embeddings = pickle.load(f)
+    except Exception:
+        post_embeddings = None
+else:
+    post_embeddings = fetch_embeddings([p["text"] for p in metadata])
+    with open(EMBED_FILE, "wb") as f:
+        pickle.dump(post_embeddings, f)
+
+if not post_embeddings:
+    post_embeddings = fetch_embeddings([p["text"] for p in metadata])
+
+# Chat completion
+def generate_response(question: str, context: str, image: Optional[str] = None) -> str:
     try:
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "You are an intelligent and helpful teaching assistant for a Data Science course. "
-                    "You answer student questions clearly, concisely, and accurately using the provided course material context. "
-                    "If the context is not helpful or the question is outside scope, respond accordingly and recommend related topics or course sections if possible."
+                    "You are a helpful AI teaching assistant for a university-level data science course. "
+                    "Respond to students with clear, fact-based answers using the context provided."
                 )
             },
             {
                 "role": "user",
-                "content": (
-                    f"I have a question related to the course:\n\n"
-                    f"**Question:** {question}\n\n"
-                    f"**Relevant Course Material:**\n{context}\n\n"
-                    f"Please use the context if it's useful. If the context doesn't answer the question, just say so politely."
-                )
+                "content": f"Student asked: {question}\nRelevant context:\n{context}"
             }
         ]
-
         if image:
             messages.append({
                 "role": "user",
-                "content": f"An image was attached that might be relevant: {image}\nPlease consider this in your answer if it helps."
+                "content": f"Also consider this image (base64 or URL): {image}"
             })
-
-        response = requests.post(
-            f"{AIPROXY_URL}v1/chat/completions",
+        res = requests.post(
+            f"{PROXY_URL}v1/chat/completions",
             headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {AIPROXY_TOKEN}"
+                "Authorization": f"Bearer {PROXY_TOKEN}",
+                "Content-Type": "application/json"
             },
-            json={
-                "model": "gpt-4o-mini",
-                "messages": messages,
-                "max_tokens": 200
-            },
+            json={"model": "gpt-4o-mini", "messages": messages, "max_tokens": 200},
             timeout=15
         )
-        response.raise_for_status()
-        return response.json().get("choices", [{}])[0].get("message", {}).get("content", "No answer available")
-    except Exception as e:
-        print(f"Chat completion error: {e}")
-        return "Sorry, I couldn't generate an answer. Please refer to the linked resources."
+        res.raise_for_status()
+        return res.json().get("choices", [{}])[0].get("message", {}).get("content", "No response.")
+    except Exception as err:
+        print("Chat completion error:", err)
+        return "I'm unable to answer right now. Please refer to your course material."
 
-# Load or generate post embeddings
-embedding_cache_path = os.path.join(data_dir, "post_embeddings_combined.pkl")
-if os.path.exists(embedding_cache_path):
-    try:
-        with open(embedding_cache_path, "rb") as f:
-            post_embeddings = pickle.load(f)
-    except Exception as e:
-        print(f"Embedding load error: {e}")
-        post_embeddings = None
-else:
-    print("Generating new embeddings...")
-    post_texts = [post["text"] for post in metadata]
-    post_embeddings = get_embeddings(post_texts)
-    try:
-        with open(embedding_cache_path, "wb") as f:
-            pickle.dump(post_embeddings, f)
-    except Exception as e:
-        print(f"Embedding save error: {e}")
-
+# Main API
 @app.api_route("/api/", methods=["POST", "OPTIONS"])
-async def answer_question(request: Request):
+async def handle_query(request: Request):
     if request.method == "OPTIONS":
         return {}
 
     try:
-        body = await request.body()
-        try:
-            data = json.loads(body.decode("utf-8"))
-            if isinstance(data, str):
-                data = json.loads(data)
-            query = Query(**data)
-        except json.JSONDecodeError:
-            query = Query(**await request.json())
+        data = await request.json()
+        user_input = UserQuery(**data)
+        question = user_input.question
+        image = user_input.image
 
-        question = query.question
-        question_embedding = get_embeddings([question])[0]
-        if not question_embedding or all(v == 0 for v in question_embedding):
-            raise Exception("Embedding failed")
+        query_vector = fetch_embeddings([question])[0]
+        if not query_vector or all(x == 0 for x in query_vector):
+            raise ValueError("Invalid embedding generated.")
 
-        similarities = [
-            np.dot(question_embedding, post_emb) / (np.linalg.norm(question_embedding) * np.linalg.norm(post_emb))
-            if np.linalg.norm(post_emb) > 0 else 0
-            for post_emb in post_embeddings
+        # Cosine similarity
+        sims = [
+            np.dot(query_vector, emb) / (np.linalg.norm(query_vector) * np.linalg.norm(emb))
+            if np.linalg.norm(emb) > 0 else 0
+            for emb in post_embeddings
         ]
-        top_indices = np.argsort(similarities)[-5:][::-1]
+        top_indices = np.argsort(sims)[-5:][::-1]
 
-        links = []
         context = ""
+        links = []
         for idx in top_indices:
-            if similarities[idx] > 0.1 and idx < len(metadata):
-                post = metadata[idx]
-                text = post["text"].split(".")[0]
-                if len(text) > 100:
-                    text = text[:97] + "..."
-                links.append({
-                    "url": post["url"],
-                    "text": text
-                })
-                context += f"- {post['text'][:500]}\n"
+            if sims[idx] > 0.1:
+                snippet = metadata[idx]
+                short_text = snippet["text"].split(".")[0]
+                if len(short_text) > 100:
+                    short_text = short_text[:97] + "..."
+                context += f"- {snippet['text'][:500]}\n"
+                links.append({"url": snippet["url"], "text": short_text})
 
-        answer = get_chat_completion(question, context, query.image)
+        response = generate_response(question, context, image)
+        return {"answer": response, "links": links}
 
-        return {
-            "answer": answer,
-            "links": links
-        }
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=f"Internal Error: {str(err)}")
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
