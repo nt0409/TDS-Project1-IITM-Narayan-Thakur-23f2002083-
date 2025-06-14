@@ -16,7 +16,7 @@ This project is a Promptfoo-powered evaluation system for a Virtual Teaching Ass
 
 ## 📡 API Endpoint
 
-**POST** `/api/`
+**POST** https://tds-project1-iitm-narayan-thakur-7umd.onrender.com/api/
 
 ---
 
