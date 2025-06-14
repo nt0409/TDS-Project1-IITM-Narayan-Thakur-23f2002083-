@@ -14,6 +14,21 @@ This project is a Promptfoo-powered evaluation system for a Virtual Teaching Ass
 
 ---
 
+## Endpoint
+
+**POST** `/api/`
+
+---
+
+## Request Format
+
+```json
+{
+  "question": "Your question here",
+  "image": "base64_encoded_image (optional)"
+}
+
+
 ## 📂 Project Structure
 
 project-root/
