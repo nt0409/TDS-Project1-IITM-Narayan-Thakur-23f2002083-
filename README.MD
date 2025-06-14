@@ -14,31 +14,36 @@ This project is a Promptfoo-powered evaluation system for a Virtual Teaching Ass
 
 ---
 
-## Endpoint
+## 📡 Endpoint
 
 **POST** `/api/`
 
 ---
 
-## Request Format
+## 📤 Request Format
 
 ```json
 {
   "question": "Your question here",
   "image": "base64_encoded_image (optional)"
 }
-
-
-## 📂 Project Structure
-
+{
+  "answer": "Detailed answer based on course content",
+  "links": [
+    {
+      "url": "https://relevant-link.com",
+      "text": "Description of the linked content"
+    }
+  ]
+}
 project-root/
 ├── ScrappingScript/
 │   ├── CourseContent_Scrapping.py
 │   ├── Discourse_Scrapping.py
-│   └── app/
-│       ├── __pycache__/
-│       ├── __init__.py
-│       └── main.py
+├── app/
+│   ├── __pycache__/
+│   ├── __init__.py
+│   └── main.py
 ├── data/
 ├── .gitignore
 ├── LICENSE
@@ -46,26 +51,12 @@ project-root/
 ├── project-tds-virtual-ta-q1.webp
 └── requirements.txt
 
-Install Promptfoo
 npm install -g promptfoo
 
-
-Run Evaluation
 npx promptfoo eval -c project-tds-virtual-ta-promptfoo.yaml
 
 
-Sample Test Case Format (JSON)
-json
-Copy
-Edit
 {
   "question": "What is the deadline for the TDS Week 5 quiz?",
   "image": "images/project-tds-virtual-ta-q1.webp"
 }
-
- License
-This project is licensed under the MIT License.
-
-Author
-Narayan Thakur
-IIT Madras BS Degree, Batch 23f2002083
