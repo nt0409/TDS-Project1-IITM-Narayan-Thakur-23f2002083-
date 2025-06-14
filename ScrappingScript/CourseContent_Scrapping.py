@@ -1,73 +1,73 @@
+import os
+import time
+import json
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
-import json
-import os
-import time
 
-TARGET_URL = "https://tds.s-anand.net/#/2025-01/"
+COURSE_URL = "https://tds.s-anand.net/#/2025-01/"
 
-def initialize_browser():
-    chrome_options = webdriver.ChromeOptions()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    return webdriver.Chrome(options=chrome_options)
+def launch_headless_browser():
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless=new")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    return webdriver.Chrome(options=options)
 
-def wait_for_page(driver, timeout=20):
-    WebDriverWait(driver, timeout).until(
+def wait_until_page_loads(driver, delay=15):
+    WebDriverWait(driver, delay).until(
         EC.presence_of_element_located((By.TAG_NAME, "body"))
     )
-    time.sleep(3)  # Additional buffer for JS rendering
+    time.sleep(2.5)  # Buffer for JS-heavy pages
 
-def extract_text_from_html(html_content):
-    soup = BeautifulSoup(html_content, 'html.parser')
-    selected_tags = soup.select('.content, .main-content, article, section, div, p, h1, h2, h3, li')
-    extracted = " ".join(
-        tag.get_text(strip=True) for tag in selected_tags if tag.get_text(strip=True)
+def parse_visible_text(html):
+    soup = BeautifulSoup(html, "html.parser")
+    target_elements = soup.select('.content, .main-content, article, section, div, p, h1, h2, h3, li')
+
+    combined_text = " ".join(
+        element.get_text(strip=True) for element in target_elements if element.get_text(strip=True)
     )
-    if not extracted and soup.body:
-        print("Fallback: No main tags matched. Using <body> content.")
-        extracted = soup.body.get_text(separator=" ", strip=True)
-    return extracted
 
-def ensure_directory_exists(path):
-    if not os.path.exists(path):
-        os.makedirs(path)
+    if not combined_text and soup.body:
+        print("Fallback to full body content.")
+        combined_text = soup.body.get_text(separator=" ", strip=True)
 
-def store_data_as_json(content, output_file, source_url):
-    payload = [{"text": content, "url": source_url}]
+    return combined_text
+
+def make_sure_folder_exists(path):
+    os.makedirs(path, exist_ok=True)
+
+def save_to_json(text, filepath, source_url):
+    payload = [{"text": text, "url": source_url}]
     try:
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, ensure_ascii=False)
-        print(f" Content saved at: {output_file}")
-    except Exception as err:
-        print(f"Failed to save content: {err}")
+        with open(filepath, "w", encoding="utf-8") as file:
+            json.dump(payload, file, indent=2, ensure_ascii=False)
+        print(f"Saved content to: {filepath}")
+    except Exception as e:
+        print(f" Failed to save: {e}")
     return payload
 
-def fetch_course_page_content():
-    browser = initialize_browser()
+def scrape_course_content():
+    driver = launch_headless_browser()
     try:
-        browser.get(TARGET_URL)
-        wait_for_page(browser)
-        html = browser.page_source
-        text_content = extract_text_from_html(html)
+        driver.get(COURSE_URL)
+        wait_until_page_loads(driver)
+        html_content = driver.page_source
+        extracted_text = parse_visible_text(html_content)
 
-        print(f" Content length: {len(text_content)} characters")
-        if len(text_content) < 50:
-            print("Very short content. Possible render issue.")
-            print(" Page preview:", html[:300])
+        print(f" Extracted {len(extracted_text)} characters")
+        if len(extracted_text) < 100:
+            print(" Warning: Extracted content is very short.")
 
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        save_dir = os.path.join(script_dir, "..", "data")
-        ensure_directory_exists(save_dir)
-        output_path = os.path.join(save_dir, "course_content.json")
+        base_path = os.path.abspath(os.path.join(__file__, "..", "..", "data"))
+        make_sure_folder_exists(base_path)
+        output_file = os.path.join(base_path, "CourseContentData.json")
 
-        return store_data_as_json(text_content, output_path, TARGET_URL)
+        return save_to_json(extracted_text, output_file, COURSE_URL)
     finally:
-        browser.quit()
+        driver.quit()
 
 if __name__ == "__main__":
-    fetch_course_page_content()
+    scrape_course_content()
