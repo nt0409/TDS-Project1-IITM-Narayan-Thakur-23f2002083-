@@ -24,6 +24,6 @@ This project is a Promptfoo-powered evaluation system for a Virtual Teaching Ass
 
 ```json
 {
-  "question": "Your question here",
-  "image": "base64_encoded_image (optional)"
+  "question": "What is the deadline for the TDS Week 5 quiz?",
+  "image": "images/project-tds-virtual-ta-q1.webp"
 }
