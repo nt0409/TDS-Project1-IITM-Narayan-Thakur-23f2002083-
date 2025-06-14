@@ -27,3 +27,11 @@ This project is a Promptfoo-powered evaluation system for a Virtual Teaching Ass
   "question": "What is the deadline for the TDS Week 5 quiz?",
   "image": "images/project-tds-virtual-ta-q1.webp"
 }
+
+
+License
+This project is licensed under the MIT License.
+
+Author
+Narayan Thakur
+IIT Madras BS Degree, Batch 23f2002083
