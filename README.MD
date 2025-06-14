@@ -14,49 +14,16 @@ This project is a Promptfoo-powered evaluation system for a Virtual Teaching Ass
 
 ---
 
-## 📡 Endpoint
+## Endpoint
 
 **POST** `/api/`
 
 ---
 
-## 📤 Request Format
+## Request Format
 
 ```json
 {
   "question": "Your question here",
   "image": "base64_encoded_image (optional)"
-}
-{
-  "answer": "Detailed answer based on course content",
-  "links": [
-    {
-      "url": "https://relevant-link.com",
-      "text": "Description of the linked content"
-    }
-  ]
-}
-project-root/
-├── ScrappingScript/
-│   ├── CourseContent_Scrapping.py
-│   ├── Discourse_Scrapping.py
-├── app/
-│   ├── __pycache__/
-│   ├── __init__.py
-│   └── main.py
-├── data/
-├── .gitignore
-├── LICENSE
-├── project-tds-virtual-ta-promptfoo.yaml
-├── project-tds-virtual-ta-q1.webp
-└── requirements.txt
-
-npm install -g promptfoo
-
-npx promptfoo eval -c project-tds-virtual-ta-promptfoo.yaml
-
-
-{
-  "question": "What is the deadline for the TDS Week 5 quiz?",
-  "image": "images/project-tds-virtual-ta-q1.webp"
 }
