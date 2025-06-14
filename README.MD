@@ -29,9 +29,3 @@ This project is a Promptfoo-powered evaluation system for a Virtual Teaching Ass
 }
 
 
-License
-This project is licensed under the MIT License.
-
-Author
-Narayan Thakur
-IIT Madras BS Degree, Batch 23f2002083
