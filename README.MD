@@ -16,7 +16,7 @@ This project is a Promptfoo-powered evaluation system for a Virtual Teaching Ass
 
 ## 📂 Project Structure
 
-TDS-Project1-IITM-Narayan-Thakur-23f2002083-/
+project-root/
 ├── ScrappingScript/
 │   ├── CourseContent_Scrapping.py
 │   ├── Discourse_Scrapping.py
@@ -29,8 +29,7 @@ TDS-Project1-IITM-Narayan-Thakur-23f2002083-/
 ├── LICENSE
 ├── project-tds-virtual-ta-promptfoo.yaml
 ├── project-tds-virtual-ta-q1.webp
-├── requirements.txt
-
+└── requirements.txt
 
 Install Promptfoo
 npm install -g promptfoo
