@@ -9,11 +9,12 @@ import json
 from typing import List
 import time
 from dotenv import load_dotenv
+
 load_dotenv()
 
 app = FastAPI()
 
-# CORS
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,7 +23,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# AIPROXY
+# AIPROXY configuration
 AIPROXY_URL = "https://aiproxy.sanand.workers.dev/openai/"
 AIPROXY_TOKEN = os.getenv("AIPROXY_TOKEN")
 print("DEBUG AIPROXY_TOKEN:", AIPROXY_TOKEN)
@@ -33,17 +34,16 @@ class Query(BaseModel):
     question: str
     image: str | None = None
 
-# File paths
+# Paths
 script_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.join(script_dir, "..", "data")
 os.makedirs(data_dir, exist_ok=True)
 index_path = os.path.join(data_dir, "post_index_combined.pkl")
 
-# Combine discourse and course content
+# Load combined metadata
 def load_combined_metadata():
     combined = []
 
-    # Load DiscourseData (JSONL format)
     discourse_path = os.path.join(data_dir, "discourse_posts.json")
     if os.path.exists(discourse_path):
         with open(discourse_path, "r", encoding="utf-8") as f:
@@ -59,7 +59,6 @@ def load_combined_metadata():
     else:
         print("Discourse data not found!")
 
-    # Load CoursecontentData (JSONL format)
     course_path = os.path.join(data_dir, "course_content.json")
     if os.path.exists(course_path):
         with open(course_path, "r", encoding="utf-8") as f:
@@ -75,9 +74,9 @@ def load_combined_metadata():
     else:
         print("Course content data not found!")
 
-    return combined[:100]  # Trim for performance
+    return combined[:100]
 
-# Load or regenerate index
+# Load or regenerate metadata index
 if os.path.exists(index_path):
     try:
         with open(index_path, "rb") as f:
@@ -96,7 +95,7 @@ else:
     except Exception as e:
         print(f"Error saving metadata: {e}")
 
-# Embeddings
+# Get embeddings
 def get_embeddings(texts: List[str], batch_size: int = 5, retries: int = 3) -> List[List[float]]:
     embeddings = []
     for i in range(0, len(texts), batch_size):
@@ -126,15 +125,35 @@ def get_embeddings(texts: List[str], batch_size: int = 5, retries: int = 3) -> L
                 time.sleep(2 ** attempt)
     return embeddings
 
-# Chat Completion
+# Chat Completion with prompts
 def get_chat_completion(question: str, context: str, image: str | None = None) -> str:
     try:
         messages = [
-            {"role": "system", "content": "You are a teaching assistant for a data science course. Provide a concise, accurate answer."},
-            {"role": "user", "content": f"Question: {question}\nContext: {context}"}
+            {
+                "role": "system",
+                "content": (
+                    "You are an intelligent and helpful teaching assistant for a Data Science course. "
+                    "You answer student questions clearly, concisely, and accurately using the provided course material context. "
+                    "If the context is not helpful or the question is outside scope, respond accordingly and recommend related topics or course sections if possible."
+                )
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"I have a question related to the course:\n\n"
+                    f"**Question:** {question}\n\n"
+                    f"**Relevant Course Material:**\n{context}\n\n"
+                    f"Please use the context if it's useful. If the context doesn't answer the question, just say so politely."
+                )
+            }
         ]
+
         if image:
-            messages.append({"role": "user", "content": f"Attached image: {image}"})
+            messages.append({
+                "role": "user",
+                "content": f"An image was attached that might be relevant: {image}\nPlease consider this in your answer if it helps."
+            })
+
         response = requests.post(
             f"{AIPROXY_URL}v1/chat/completions",
             headers={
@@ -154,7 +173,7 @@ def get_chat_completion(question: str, context: str, image: str | None = None) -
         print(f"Chat completion error: {e}")
         return "Sorry, I couldn't generate an answer. Please refer to the linked resources."
 
-# Load or compute embeddings
+# Load or generate post embeddings
 embedding_cache_path = os.path.join(data_dir, "post_embeddings_combined.pkl")
 if os.path.exists(embedding_cache_path):
     try:
@@ -223,7 +242,3 @@ async def answer_question(request: Request):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
