@@ -55,7 +55,7 @@ def main():
             all_posts.extend(posts)
 
     # Save the scraped posts into a JSON file
-    with open("Discourse.jsonl", "w", encoding="utf-8") as f:
+    with open("DiscourseData.json", "w", encoding="utf-8") as f:
         json.dump(all_posts, f, indent=2, ensure_ascii=False)
 
     print(f"Scraped {len(all_posts)} posts.")
