@@ -37,3 +37,9 @@ This project is a Promptfoo-powered evaluation system for a Virtual Teaching Ass
 BSc in Data Science and Applications, IIT Madras  
 Student ID: `23f2002083`  
 GitHub: [nt0409](https://github.com/nt0409)
+
+---
+
+## 📝 License
+
+This project is licensed under the [MIT License](LICENSE) – see the LICENSE file for details.
